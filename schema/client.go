@@ -13,7 +13,7 @@ import (
 	"github.com/linkedin/goavro/v2"
 )
 
-type SchemaRegistryClient struct {
+type RegistryClient struct {
 	url                     string
 	httpClient              *http.Client
 	enableCache             bool
@@ -22,8 +22,10 @@ type SchemaRegistryClient struct {
 	enableCodecCreationLock sync.RWMutex
 	schemaIDCache           map[int]*Schema
 	schemaIDCacheLock       sync.RWMutex
-	schemaSubjectCache      map[string]*SubjectSchema
+	schemaSubjectCache      map[string]SubjectSchema
 	schemaSubjectCacheLock  sync.RWMutex
+	subjectIDCache			map[string][]int
+	subjectIDCacheLock		sync.RWMutex
 }
 
 type Schema struct {
@@ -56,32 +58,34 @@ const (
 
 	allSubjects            = "/subjects"
 	schemaSubjectVersion   = "/subjects/%s/versions"
+	deleteSubject          = "/subjects/%s?permanent=%t"
 	schemaBySubjectVersion = "/subjects/%s/versions/%d"
 	latestSchema           = "/subjects/%s/versions/latest"
 	schemaReferencedBy     = "/subjects/%s/versions/%s/referencedby"
 
-	globalMode  = "/mode"
-	subjectMode = "/mode/%s"
+	compatibility = "/compatibility/subjects/%s/versions/%v"
+
+
 )
 
-func NewSchemaRegistryClient(url string) *SchemaRegistryClient {
-	return &SchemaRegistryClient{
+func NewSchemaRegistryClient(url string) *RegistryClient {
+	return &RegistryClient{
 		url:                 url,
 		httpClient:          &http.Client{Timeout: 5 * time.Second},
 		enableCache:         true,
 		enableCodecCreation: false,
 		schemaIDCache:       make(map[int]*Schema),
-		schemaSubjectCache:  make(map[string]*SubjectSchema),
+		schemaSubjectCache:  make(map[string]SubjectSchema),
+		subjectIDCache:		 make(map[string][]int),
 	}
 }
 
-func (sr *SchemaRegistryClient) GetSchemaByID(id int) (*Schema, error) {
+func (sr *RegistryClient) GetSchemaByID(id int) (*Schema, error) {
 	// If schema exists in cache, return schema for ID
 	if sr.isCachingAvailable() {
 		sr.schemaIDCacheLock.RLock()
-		schema := sr.schemaIDCache[id]
-		sr.schemaIDCacheLock.RUnlock()
-		if schema != nil {
+		if schema, ok := sr.schemaIDCache[id]; ok {
+			sr.schemaIDCacheLock.RUnlock()
 			return schema, nil
 		}
 	}
@@ -122,15 +126,40 @@ func (sr *SchemaRegistryClient) GetSchemaByID(id int) (*Schema, error) {
 	}
 
 	if sr.enableCache {
+		//id - schema cache
 		sr.schemaIDCacheLock.Lock()
 		sr.schemaIDCache[id] = schema
 		sr.schemaIDCacheLock.Unlock()
-	}
 
+		if schemas, ok := sr.schemaSubjectCache[schemaResp.Subject]; ok {
+			sr.schemaSubjectCacheLock.Lock()
+			sr.schemaSubjectCache[schemaResp.Subject] = append(schemas, schema)
+			sr.schemaSubjectCacheLock.Unlock()
+		} else {
+			var array SubjectSchema
+			array = append(array, schema)
+			sr.schemaSubjectCacheLock.Lock()
+			sr.schemaSubjectCache[schemaResp.Subject] = array
+			sr.schemaSubjectCacheLock.Unlock()
+		}
+		// subject-ids mapping
+		if schemaIds, ok := sr.subjectIDCache[schemaResp.Subject]; ok {
+			sr.subjectIDCacheLock.Lock()
+			sr.subjectIDCache[schemaResp.Subject] = append(schemaIds, id)
+			sr.subjectIDCacheLock.Unlock()
+		}else{
+			var idArray []int
+			idArray = append(idArray, id)
+			sr.subjectIDCacheLock.Lock()
+			sr.subjectIDCache[schemaResp.Subject] = idArray
+			sr.subjectIDCacheLock.Unlock()
+		}
+
+	}
 	return schema, nil
 }
 
-func (sr *SchemaRegistryClient) GetSchemaTypes() (typesSchemas []string, err error) {
+func (sr *RegistryClient) GetSchemaTypes() (typesSchemas []string, err error) {
 	body, err := sr.request("GET", schemaTypes, nil)
 	if err != nil {
 		return
@@ -143,12 +172,11 @@ func (sr *SchemaRegistryClient) GetSchemaTypes() (typesSchemas []string, err err
 	return
 }
 
-func (sr *SchemaRegistryClient) GetSchemaIDVersion(id int) (int, error) {
+func (sr *RegistryClient) GetSchemaIDVersions(id int) (int, error) {
 	if sr.isCachingAvailable() {
 		sr.schemaIDCacheLock.RLock()
-		schema := sr.schemaIDCache[id]
-		sr.schemaIDCacheLock.RUnlock()
-		if schema != nil {
+		if schema, ok := sr.schemaIDCache[id]; ok {
+			sr.schemaIDCacheLock.RUnlock()
 			return schema.Version, nil
 		}
 	}
@@ -164,7 +192,7 @@ func (sr *SchemaRegistryClient) GetSchemaIDVersion(id int) (int, error) {
 	return result[0].Version, nil
 }
 
-func (sr *SchemaRegistryClient) GetAllSubjects() (subjects []string, err error) {
+func (sr *RegistryClient) GetAllSubjects() (subjects []string, err error) {
 
 	body, err := sr.request("GET", allSubjects, nil)
 	if err != nil {
@@ -179,16 +207,15 @@ func (sr *SchemaRegistryClient) GetAllSubjects() (subjects []string, err error) 
 
 }
 
-func (sr *SchemaRegistryClient) GetSchemaVersions(subject string) ([]int, error) {
+func (sr *RegistryClient) GetSubjectVersions(subject string) ([]int, error) {
 	if sr.isCachingAvailable() {
-
 		sr.schemaSubjectCacheLock.RLock()
 		schema := sr.schemaSubjectCache[subject]
 		sr.schemaSubjectCacheLock.RUnlock()
 
 		if schema != nil {
 			var versionArr []int
-			for _, s := range *schema {
+			for _, s := range schema {
 				versionArr = append(versionArr, s.Version)
 			}
 			return versionArr, nil
@@ -206,13 +233,32 @@ func (sr *SchemaRegistryClient) GetSchemaVersions(subject string) ([]int, error)
 	return version, nil
 }
 
-func (sr *SchemaRegistryClient) GetSchemaForVersion(subject string, version int) (*Schema, error) {
+func (sr *RegistryClient) DeleteSubject(subject string, hardDelete bool) ([]int, error) {
+	if sr.isCachingAvailable() {
+		sr.schemaSubjectCacheLock.RLock()
+		delete(sr.schemaSubjectCache, subject)
+		sr.schemaSubjectCacheLock.RUnlock()
+	}
+	body, err := sr.request("DELETE", fmt.Sprintf(deleteSubject, subject, hardDelete), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var versions []int
+	err = json.Unmarshal(body, &versions)
+	if err != nil {
+		return nil, err
+	}
+	return versions, nil
+}
+
+func (sr *RegistryClient) GetSchemaForVersion(subject string, version int) (*Schema, error) {
 	if sr.isCachingAvailable() {
 		sr.schemaSubjectCacheLock.RLock()
 		schema := sr.schemaSubjectCache[subject]
 		sr.schemaSubjectCacheLock.RUnlock()
 		if schema != nil {
-			for _, s := range *schema {
+			for _, s := range schema {
 				if s.Version == version {
 					return s, nil
 				}
@@ -249,20 +295,20 @@ func (sr *SchemaRegistryClient) GetSchemaForVersion(subject string, version int)
 	array = append(array, schema)
 	if sr.enableCache {
 		sr.schemaSubjectCacheLock.Lock()
-		sr.schemaSubjectCache[subject] = &array
+		sr.schemaSubjectCache[subject] = array
 		sr.schemaSubjectCacheLock.Unlock()
 	}
 
 	return schema, nil
 }
 
-func (sr *SchemaRegistryClient) GetLatestSchema(subject string) (*Schema, error) {
+func (sr *RegistryClient) GetLatestSchema(subject string) (*Schema, error) {
 	if sr.isCachingAvailable() {
 		sr.schemaSubjectCacheLock.RLock()
 		schema := sr.schemaSubjectCache[subject]
 		sr.schemaSubjectCacheLock.RUnlock()
 		if schema != nil {
-			schema := (*schema)[len(*schema)-1]
+			schema := (schema)[len(schema)-1]
 			return schema, nil
 		}
 	}
@@ -295,13 +341,13 @@ func (sr *SchemaRegistryClient) GetLatestSchema(subject string) (*Schema, error)
 	array = append(array, schema)
 	if sr.enableCache {
 		sr.schemaSubjectCacheLock.Lock()
-		sr.schemaSubjectCache[subject] = &array
+		sr.schemaSubjectCache[subject] = array
 		sr.schemaSubjectCacheLock.Unlock()
 	}
 
 	return schema, nil
 }
-func (sr *SchemaRegistryClient) referencedBy(subject string, version string) ([]int, error) {
+func (sr *RegistryClient) referencedBy(subject string, version string) ([]int, error) {
 	body, err := sr.request("GET", fmt.Sprintf(schemaReferencedBy, subject, version), nil)
 	if err != nil {
 		return nil, err
@@ -313,7 +359,7 @@ func (sr *SchemaRegistryClient) referencedBy(subject string, version string) ([]
 	}
 	return schemaIDs, nil
 }
-func (sr *SchemaRegistryClient) GetSchemaReferencedBy(subject string, version int) ([]int, error) {
+func (sr *RegistryClient) GetSchemaReferencedBy(subject string, version int) ([]int, error) {
 	schemaIDs, err := sr.referencedBy(subject, strconv.Itoa(version))
 	if err != nil {
 		return nil, err
@@ -321,7 +367,7 @@ func (sr *SchemaRegistryClient) GetSchemaReferencedBy(subject string, version in
 	return schemaIDs, nil
 }
 
-func (sr *SchemaRegistryClient) GetLatestSchemaReferencedBy(subject string) ([]int, error) {
+func (sr *RegistryClient) GetLatestSchemaReferencedBy(subject string) ([]int, error) {
 	schemaIDs, err := sr.referencedBy(subject, "latest")
 	if err != nil {
 		return nil, err
@@ -329,21 +375,19 @@ func (sr *SchemaRegistryClient) GetLatestSchemaReferencedBy(subject string) ([]i
 	return schemaIDs, nil
 }
 
-func (sr *SchemaRegistryClient) isCachingAvailable() bool {
+func (sr *RegistryClient) isCachingAvailable() bool {
 	sr.enableCacheLock.RLock()
 	defer sr.enableCacheLock.RUnlock()
 	return sr.enableCache
 }
 
-func (sr *SchemaRegistryClient) request(method, uri string, payload io.Reader) ([]byte, error) {
+func (sr *RegistryClient) request(method, uri string, payload io.Reader) ([]byte, error) {
 	url := fmt.Sprintf("%s%s", sr.url, uri)
 	req, err := http.NewRequest(method, url, payload)
 	if err != nil {
 		return nil, err
 	}
-	// if client.credentials != nil {
-	// 	req.SetBasicAuth(client.credentials.username, client.credentials.password)
-	// }
+
 	req.Header.Set("Content-Type", contentType)
 
 	resp, err := sr.httpClient.Do(req)
