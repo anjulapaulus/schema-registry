@@ -48,7 +48,20 @@ func TestGetSchema(t *testing.T) {
 		t.Error("TestGetSchema: failed creating client")
 	}
 	body := schemaPayload{
-		Schema: "{\"type\":\"record\",\"name\":\"BankStatusChanged\",\"namespace\":\"com.pickme.events.payment\",\"fields\":[{\"name\":\"id\",\"type\":\"string\"},{\"name\":\"type\",\"type\":\"string\"},{\"name\":\"body\",\"type\":{\"type\":\"record\",\"name\":\"Body\",\"namespace\":\"com.pickme.events.payment.bank_status_changed\",\"fields\":[{\"name\":\"id\",\"type\":\"long\"},{\"name\":\"bank\",\"type\":\"int\"},{\"name\":\"transaction_reference_id\",\"type\":\"string\"},{\"name\":\"payment_type\",\"type\":\"int\"},{\"name\":\"payment_type_reference_id\",\"type\":\"long\"},{\"name\":\"status\",\"type\":\"int\"},{\"name\":\"updated_datetime\",\"type\":\"long\"},{\"name\":\"created_datetime\",\"type\":\"long\"}]}},{\"name\":\"created_at\",\"type\":\"long\"},{\"name\":\"expiry\",\"type\":\"long\",\"default\":0},{\"name\":\"version\",\"type\":\"int\",\"default\":0},{\"name\":\"trace_info\",\"type\":{\"type\":\"record\",\"name\":\"TraceInfo\",\"fields\":[{\"name\":\"trace_id\",\"type\":{\"type\":\"record\",\"name\":\"TraceId\",\"fields\":[{\"name\":\"high\",\"type\":\"long\",\"default\":0},{\"name\":\"low\",\"type\":\"long\",\"default\":0}]}},{\"name\":\"span_id\",\"type\":\"long\",\"default\":0},{\"name\":\"parent_id\",\"type\":\"long\",\"default\":0},{\"name\":\"sampled\",\"type\":\"boolean\",\"default\":false}]}}]}",
+		Schema: `{
+			"type": "record",
+			"name": "LongList",
+			"fields": [
+			  {
+				"name": "next",
+				"type": [
+				  "null",
+				  "LongList"
+				],
+				"default": null
+			  }
+			]
+		  }`,
 	}
 	out, err := json.Marshal(body)
 	if err != nil {
@@ -106,13 +119,8 @@ func TestGetSubjects(t *testing.T) {
 	}
 
 	body := []string{
-		"com.pickme.events.job.ArrivedAtPickup",
-		"shuttle_passenger_alight-value",
-		"com.pickme.events.job.PreptimeExtendFailed",
-		"driver_services.payment_events.complete_payment",
-		"com.pickme.events.auth.TokenRevoked",
-		"heat_changed-value",
-		"com.pickme.events.driver.DriverVehicleAssigned",
+		"com.test1",
+		"com.test2",
 	}
 
 	out, err := json.Marshal(body)
@@ -134,8 +142,8 @@ func TestGetSubjects(t *testing.T) {
 		t.Error("TestGetSubjects: failed making get schema request", err.Error())
 	}
 
-	if len(subjects) != 7 {
-		t.Error("TestGetSubjects: not all subjects", err.Error())
+	if len(subjects) != 2 {
+		t.Error("TestGetSubjects: not all subjects")
 	}
 }
 
@@ -182,7 +190,7 @@ func TestGetVersions(t *testing.T) {
 		}, nil
 	}
 
-	versions, err := c.GetVersions("com.pickme.events.driver.DriverVehicleDowngraded")
+	versions, err := c.GetVersions("com.test")
 	if err != nil {
 		t.Error("TestGetVersions: failed making get version request", err.Error())
 	}
@@ -207,7 +215,7 @@ func TestNoGetVersions(t *testing.T) {
 		}, nil
 	}
 
-	_, err = c.GetVersions("com.pickme.events.driver.DriverVehicleDowngraded")
+	_, err = c.GetVersions("com.test")
 	if err == nil {
 		t.Error("TestNoGetVersions:  making get version request", err.Error())
 	}
@@ -221,9 +229,22 @@ func TestGetSchemaByVersion(t *testing.T) {
 	}
 	body := SchemaResponse{
 		ID:      125,
-		Subject: "com.pickme.events.driver.DriverVehicleDowngraded",
+		Subject: "com.test",
 		Version: 1,
-		Schema:  "{\"type\":\"record\",\"name\":\"DriverVehicleDowngraded\",\"namespace\":\"com.pickme.events.driver\",\"fields\":[{\"name\":\"id\",\"type\":\"string\"},{\"name\":\"type\",\"type\":\"string\"},{\"name\":\"body\",\"type\":{\"type\":\"record\",\"name\":\"Body\",\"namespace\":\"com.pickme.events.driver.driver_vehicle_downgraded\",\"fields\":[{\"name\":\"driver_id\",\"type\":\"int\"},{\"name\":\"vehicle_models\",\"type\":{\"type\":\"array\",\"items\":\"int\"}}]}},{\"name\":\"created_at\",\"type\":\"long\"},{\"name\":\"expiry\",\"type\":\"long\",\"default\":0},{\"name\":\"version\",\"type\":\"int\",\"default\":0},{\"name\":\"trace_info\",\"type\":{\"type\":\"record\",\"name\":\"TraceInfo\",\"fields\":[{\"name\":\"trace_id\",\"type\":{\"type\":\"record\",\"name\":\"TraceId\",\"fields\":[{\"name\":\"high\",\"type\":\"long\",\"default\":0},{\"name\":\"low\",\"type\":\"long\",\"default\":0}]}},{\"name\":\"span_id\",\"type\":\"long\",\"default\":0},{\"name\":\"parent_id\",\"type\":\"long\",\"default\":0},{\"name\":\"sampled\",\"type\":\"boolean\",\"default\":false}]}}]}",
+		Schema: `{
+			"type": "record",
+			"name": "LongList",
+			"fields": [
+			  {
+				"name": "next",
+				"type": [
+				  "null",
+				  "LongList"
+				],
+				"default": null
+			  }
+			]
+		  }`,
 	}
 	out, err := json.Marshal(body)
 	if err != nil {
@@ -239,7 +260,7 @@ func TestGetSchemaByVersion(t *testing.T) {
 		}, nil
 	}
 
-	schemaRes, err := c.GetSchemaByVersion("com.pickme.events.driver.DriverVehicleDowngraded", 1)
+	schemaRes, err := c.GetSchemaByVersion("com.test", 1)
 	if err != nil {
 		t.Error("TestGetSchemaByVersion: failed making get schema request", err.Error())
 	}
@@ -265,7 +286,7 @@ func TestNoGetSchemaByVersion(t *testing.T) {
 		}, nil
 	}
 
-	_, err = c.GetSchemaByVersion("com.pickme.events.driver.DriverVehicleDowngraded", 1)
+	_, err = c.GetSchemaByVersion("com.test", 1)
 	if err == nil {
 		t.Error("TestNoGetSchemaByVersion: failed making get schema request", err.Error())
 	}
@@ -279,9 +300,22 @@ func TestGetLatestSchema(t *testing.T) {
 	}
 	body := SchemaResponse{
 		ID:      125,
-		Subject: "com.pickme.events.driver.DriverVehicleDowngraded",
+		Subject: "com.test",
 		Version: 1,
-		Schema:  "{\"type\":\"record\",\"name\":\"DriverVehicleDowngraded\",\"namespace\":\"com.pickme.events.driver\",\"fields\":[{\"name\":\"id\",\"type\":\"string\"},{\"name\":\"type\",\"type\":\"string\"},{\"name\":\"body\",\"type\":{\"type\":\"record\",\"name\":\"Body\",\"namespace\":\"com.pickme.events.driver.driver_vehicle_downgraded\",\"fields\":[{\"name\":\"driver_id\",\"type\":\"int\"},{\"name\":\"vehicle_models\",\"type\":{\"type\":\"array\",\"items\":\"int\"}}]}},{\"name\":\"created_at\",\"type\":\"long\"},{\"name\":\"expiry\",\"type\":\"long\",\"default\":0},{\"name\":\"version\",\"type\":\"int\",\"default\":0},{\"name\":\"trace_info\",\"type\":{\"type\":\"record\",\"name\":\"TraceInfo\",\"fields\":[{\"name\":\"trace_id\",\"type\":{\"type\":\"record\",\"name\":\"TraceId\",\"fields\":[{\"name\":\"high\",\"type\":\"long\",\"default\":0},{\"name\":\"low\",\"type\":\"long\",\"default\":0}]}},{\"name\":\"span_id\",\"type\":\"long\",\"default\":0},{\"name\":\"parent_id\",\"type\":\"long\",\"default\":0},{\"name\":\"sampled\",\"type\":\"boolean\",\"default\":false}]}}]}",
+		Schema: `{
+			"type": "record",
+			"name": "LongList",
+			"fields": [
+			  {
+				"name": "next",
+				"type": [
+				  "null",
+				  "LongList"
+				],
+				"default": null
+			  }
+			]
+		  }`,
 	}
 	out, err := json.Marshal(body)
 	if err != nil {
@@ -297,7 +331,7 @@ func TestGetLatestSchema(t *testing.T) {
 		}, nil
 	}
 
-	schemaRes, err := c.GetLatestSchema("com.pickme.events.driver.DriverVehicleDowngraded")
+	schemaRes, err := c.GetLatestSchema("com.test")
 	if err != nil {
 		t.Error("TestGetLatestSchema: failed making get schema request", err.Error())
 	}
@@ -322,7 +356,7 @@ func TestNoGetLatestSchema(t *testing.T) {
 		}, nil
 	}
 
-	_, err = c.GetLatestSchema("com.pickme.events.driver.DriverVehicleDowngraded")
+	_, err = c.GetLatestSchema("com.test")
 	if err == nil || err.Error() == "" {
 		t.Error("TestGetLatestSchema: making get schema request", err.Error())
 	}
@@ -368,4 +402,34 @@ func TestDoRequest(t *testing.T) {
 	}
 
 	c.Request(http.MethodGet, "", "", nil)
+}
+
+func TestGetSubjectVersionByID(t *testing.T) {
+	client := &HTTPClientMock{}
+	c, err := NewClient("localhost:8080", WithCustomHTTPClient(client))
+	if err != nil {
+		t.Error("TestGetSubjectVersionByID: failed creating client")
+	}
+	body := SubjectVersion{
+		Subject: "com.test",
+		Version: 1,
+	}
+	out, err := json.Marshal(body)
+	if err != nil {
+		t.Error("TestGetSubjectVersionByID: failed marshalling")
+	}
+
+	client.DoFunc = func(r *http.Request) (*http.Response, error) {
+		return &http.Response{
+			// create the custom body
+			Body: ioutil.NopCloser(strings.NewReader(string(out))),
+			// create the custom status code
+			StatusCode: 200,
+		}, nil
+	}
+
+	_, err = c.GetSubjectVersionByID(200)
+	if err == nil || err.Error() == "" {
+		t.Error("TestGetSubjectVersionByID: making get schema request", err.Error())
+	}
 }

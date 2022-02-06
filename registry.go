@@ -54,7 +54,6 @@ func NewRegistry(url string, ops ...regOps) (*SchemaRegistry, error) {
 		ssMu:                 new(sync.RWMutex),
 		idMu:                 new(sync.RWMutex),
 		registry:             client,
-		// cache:                opts.cache,
 	}
 
 	return &r, nil
